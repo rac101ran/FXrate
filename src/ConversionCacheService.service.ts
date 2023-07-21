@@ -13,6 +13,8 @@ import * as fs from 'fs';
 @Injectable()
 export class ConversionCache {
     private readonly MAX_CACHE_SIZE = 50;
+    private retries = new Map<number, { nextRetryTimestamp: number; retryCount: number }>();
+
     constructor(
         @Inject(CACHE_MANAGER) private cacheManager: Cache,
         @InjectRepository(User) private userRepository: Repository<User>,
@@ -27,7 +29,7 @@ export class ConversionCache {
                 const fromCurrency = currencyCodes[i];
                 const toCurrency = currencyCodes[j];
 
-             //   console.log(fromCurrency, " ", toCurrency)
+
 
                 const cacheCurrencyPairKey = this.generateCacheKey(fromCurrency, toCurrency);
 
@@ -72,52 +74,73 @@ export class ConversionCache {
             throw new NotFoundException('User not found');
         }
 
-        // Check if the user has enough balance in the fromCurrency
-        const fromCurrency = user.currencies.find((currency) => currency.name === conversionData.fromCurrency);
-        if (!fromCurrency || fromCurrency.balance < conversionData.amount) {
-            throw new NotFoundException(`Insufficient balance in ${conversionData.fromCurrency}`);
+        try {
+            if (this.retries.get(conversionData.user_id) && this.retries.get(conversionData.user_id).nextRetryTimestamp > Math.round(Date.now() / 1000)) {
+                const nextRetryTimeSeconds = this.retries.get(conversionData.user_id).nextRetryTimestamp
+                return {
+                    status: HttpStatus.REQUEST_TIMEOUT,
+                    message: `Try after ${nextRetryTimeSeconds - Math.round(Date.now() / 1000)} seconds.`
+                };
+            }
+            // Check if the user has enough balance in the fromCurrency
+            const fromCurrency = user.currencies.find((currency) => currency.name === conversionData.fromCurrency);
+            if (!fromCurrency || fromCurrency.balance < conversionData.amount) {
+                throw new NotFoundException(`Insufficient balance in ${conversionData.fromCurrency}`);
+            }
+
+            const cacheKey = this.generateCacheKey(conversionData.fromCurrency, conversionData.toCurrency);
+            const cachedMessage = await this.cacheManager.get(cacheKey);
+
+            let formattedExchangeRate: any;
+            let priceDifference: any;
+
+            if (cachedMessage) {
+                formattedExchangeRate = (cachedMessage as { exchangeRate: any }).exchangeRate;
+                priceDifference = (cachedMessage as { priceDifference: any }).priceDifference;
+            } else {
+                const url = this.generateExchangeRateURL(conversionData.fromCurrency, conversionData.toCurrency);
+                const response = await axios.get(url);
+                const exchangeRate = response.data['Realtime Currency Exchange Rate'];
+
+                formattedExchangeRate = this.formatExchangeRate(exchangeRate);
+                priceDifference = this.calculatePriceDifference(exchangeRate);
+
+                await this.cacheManager.set(cacheKey, {
+                    exchangeRate: formattedExchangeRate,
+                    priceDifference: priceDifference,
+                }, { ttl: 30 });
+
+                await this.checkCacheSize(1);
+            }
+
+            // Perform the currency conversion
+            const convertedAmount = conversionData.amount * parseFloat(formattedExchangeRate['Exchange Rate']);
+
+            // Update the balances
+            fromCurrency.balance -= conversionData.amount;
+            const toCurrency = user.currencies.find((currency) => currency.name === conversionData.toCurrency);
+            if (toCurrency) {
+                toCurrency.balance += convertedAmount;
+                await this.currencyRepository.save([fromCurrency, toCurrency]);
+                console.log("updated", toCurrency.balance)
+            }
+
+            this.retries.delete(conversionData.user_id)
+
+            return { status: HttpStatus.OK, data: { "convertedAmount": parseFloat(convertedAmount.toFixed(2)), "currency": toCurrency.name } };
+
+        } catch (err) {
+            if (!this.retries.get(conversionData.user_id)) {
+                this.retries.set(conversionData.user_id, { retryCount: 0, nextRetryTimestamp: Math.round((Date.now() / 1000) + 1) })
+            } else {
+                const nextRetry = this.retries.get(conversionData.user_id).nextRetryTimestamp + 1;
+                this.retries.set(conversionData.user_id, { retryCount: nextRetry, nextRetryTimestamp: Math.round((Date.now() / 1000) + (1 << nextRetry)) })
+            }
+            return {
+                status: HttpStatus.REQUEST_TIMEOUT,
+                message: `Try after ${this.retries.get(conversionData.user_id).nextRetryTimestamp - Math.round(Date.now() / 1000)} seconds.`
+            };
         }
-
-        const cacheKey = this.generateCacheKey(conversionData.fromCurrency, conversionData.toCurrency);
-        const cachedMessage = await this.cacheManager.get(cacheKey);
-
-        let formattedExchangeRate: any;
-        let priceDifference: any;
-
-        if (cachedMessage) {
-            formattedExchangeRate = (cachedMessage as { exchangeRate: any }).exchangeRate;
-            priceDifference = (cachedMessage as { priceDifference: any }).priceDifference;
-        } else {
-            const url = this.generateExchangeRateURL(conversionData.fromCurrency, conversionData.toCurrency);
-            const response = await axios.get(url);
-            const exchangeRate = response.data['Realtime Currency Exchange Rate'];
-
-            formattedExchangeRate = this.formatExchangeRate(exchangeRate);
-            priceDifference = this.calculatePriceDifference(exchangeRate);
-
-            await this.cacheManager.set(cacheKey, {
-                exchangeRate: formattedExchangeRate,
-                priceDifference: priceDifference,
-            }, { ttl: 30 });
-
-            await this.checkCacheSize(1);
-        }
-
-        // Perform the currency conversion
-        const convertedAmount = conversionData.amount * parseFloat(formattedExchangeRate['Exchange Rate']);
-
-        // Update the balances
-        fromCurrency.balance -= conversionData.amount;
-        const toCurrency = user.currencies.find((currency) => currency.name === conversionData.toCurrency);
-        if (toCurrency) {
-            toCurrency.balance += convertedAmount;
-            await this.currencyRepository.save([fromCurrency, toCurrency]);
-            console.log("updated", toCurrency.balance)
-        }
-        
-        // await this.userRepository.save(user);
-
-        return { status: HttpStatus.OK, data:  {"convertedAmount": parseFloat(convertedAmount.toFixed(2)),"currency": toCurrency.name} };
     }
 
 
