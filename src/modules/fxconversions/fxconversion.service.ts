@@ -3,15 +3,15 @@ import { InjectRepository } from "@nestjs/typeorm";
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import axios from 'axios';
-import { User } from './Models/UserAccount';
-import { Currency } from './Models/UserAccount';
+import { User } from '../../datastore/UserAccount';
+import { Currency } from '../../datastore/UserAccount';
 import { Repository } from "typeorm";
 
 import * as fs from 'fs';
 
 
 @Injectable()
-export class ConversionCache {
+export class FxConversionService {
     private readonly MAX_CACHE_SIZE = 50;
     private retries = new Map<number, { nextRetryTimestamp: number; retryCount: number }>();
 

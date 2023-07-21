@@ -1,12 +1,19 @@
 import { Module } from '@nestjs/common';
-import { AccountsController, FxConversionController, FxRatesController } from './app.controller';
-import { AppService } from './Services/app.service';
+
+import { BalanceController } from './modules/balance/balance.controller';
+import { BalanceService } from './modules/balance/balance.service';
+
+import { FxConversionController } from './modules/fxconversions/fxconversion.controller';
+import { FxConversionService } from './modules/fxconversions/fxconversion.service';
+
+import { TopUpController} from './modules/topups/topup.controller';
+import { TopUpService} from './modules/topups/topup.service';
+
 import { CacheModule } from '@nestjs/cache-manager';
-import { ConversionCache } from './ConversionCacheService.service';
-import { AccountsService } from './Services/accounts.service';
+
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { User } from './Models/UserAccount';
-import { Currency } from './Models/UserAccount';
+import { User } from './datastore/UserAccount';
+import { Currency } from './datastore/UserAccount';
 
 // import { RedisCacheModule } from './redis-cache/redis-cache.module';
 // import { RedisCacheModule } from './redis-cache/redis-cache.module';
@@ -22,7 +29,7 @@ import { Currency } from './Models/UserAccount';
     entities: [User, Currency],
     synchronize: true,
   }), TypeOrmModule.forFeature([User, Currency])],
-  controllers: [AccountsController, FxConversionController, FxRatesController],
-  providers: [AppService, ConversionCache, AccountsService],
+  controllers: [TopUpController, FxConversionController, BalanceController],
+  providers: [TopUpService , FxConversionService ,  BalanceService],
 })
 export class AppModule { }
