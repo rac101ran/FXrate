@@ -10,11 +10,14 @@ import { ConversionCache } from './ConversionCacheService.service';
 export class AccountsController {
   constructor(private readonly accountsService: AccountsService) { }
 
+  // API 1
   @Post('topup')
   topUpAccount(@Body() topUpData: { currency: string; amount: number; user_id: number }) {
     return this.accountsService.topUpAccount(topUpData);
   }
 
+
+  // API 4
   @Get('balance')
   getAccountBalance(@Body() user: { user_id: number }) {
     return this.accountsService.checkBalance(user);
@@ -28,12 +31,13 @@ export class AccountsController {
 export class FxConversionController {
   constructor(private readonly fxConversionService: ConversionCache) { }
 
+  // API 3
   @Post()
   performFxConversion(@Body() conversionData: { quoteId: string; fromCurrency: string; toCurrency: string; amount: number; user_id: number }) {
     return this.fxConversionService.getExchangeRate(conversionData);
   }
 
-
+  // TASK 1
   @Get('init')
   getMostProfitablePairs() {
     return this.fxConversionService.getMostProfitablePairs();
@@ -43,7 +47,7 @@ export class FxConversionController {
 
 
 
-// cache + user
+// API 2
 @UseInterceptors(CacheInterceptor)
 @Controller('fx-rates')
 export class FxRatesController {
